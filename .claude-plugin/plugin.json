@@ -1,0 +1,10 @@
+{
+  "name": "ayushjj-skills",
+  "description": "Agent skills for checking premises, writing specs, proving checks can fail, running batch work safely, tuning prompts and explaining things plainly.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ayushjj"
+  },
+  "repository": "https://github.com/ayushjj/skills",
+  "license": "MIT"
+}
