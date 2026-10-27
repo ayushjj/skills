@@ -1,7 +1,8 @@
 # skills
 
-Agent skills I use every day, cleaned up so they work on your machine too. Each one is a folder with a
-`SKILL.md` that your coding agent loads when the task fits. They follow the open
+Skills we built while running a real business with Claude Code. I'm not an engineer, so most of these
+exist because something went wrong once and we wanted to make sure it couldn't happen again. Each one is
+a folder with a `SKILL.md` that your coding agent loads when the task fits. They follow the open
 [Agent Skills](https://agentskills.io/specification) format, so they install into Claude Code, Codex,
 Cursor and other agents that read it.
 
