@@ -53,8 +53,11 @@ Mutations modify real files. Before any mutation:
    **Paste the output.** A skill that mutates code and cannot prove it reverted is worse than
    no skill.
 
-If the target is not in a git repo, copy the file to a temp directory first and restore from
-that copy. Never mutate an unbacked file.
+`git status` cannot see files git ignores (build output, generated files) or files outside a
+repo. For each file you will mutate, run `git ls-files --error-unmatch -- <path>`. If it exits
+non-zero, copy the file to a temp directory and record `shasum -a 256 <path>`. Restore from that
+copy, then at the end re-run `shasum` and paste it beside the `git status` output; the hashes
+must match. Never mutate an unbacked file.
 
 ### Step 1: State the claim in one sentence
 
@@ -161,6 +164,7 @@ A clean result with only 2 predicate-level mutations is **not** a hardened check
 **Verdict**: HARDENED / DECORATION ON {axis} / INSUFFICIENTLY PROBED
 **Siblings to check**: {where else this shape appears}
 **Tree restored**: {git status --porcelain output — must match Step 0}
+**Untracked files restored**: {shasum before → after, or "none mutated"}
 ```
 
 If there are zero surviving mutants AND the Step 5 gate passes, say **HARDENED** plainly.
