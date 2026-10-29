@@ -1,6 +1,6 @@
 {
   "name": "ayushjj-skills",
-  "description": "Agent skills for checking premises, writing specs, proving checks can fail, running batch work safely, tuning prompts and explaining things plainly.",
+  "description": "Agent skills for checking premises, writing specs, proving checks can fail, running batch work safely, tuning prompts, explaining things plainly and learning daily from your bookmarks.",
   "owner": {
     "name": "ayushjj"
   },
@@ -8,7 +8,7 @@
     {
       "name": "ayushjj-skills",
       "source": "./",
-      "description": "premise-check, creating-specifications, harden, executing-batch-operations, prompt-engineering, autonomous-batch and plain."
+      "description": "premise-check, creating-specifications, harden, executing-batch-operations, prompt-engineering, autonomous-batch, plain and brief."
     }
   ]
 }

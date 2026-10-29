@@ -37,6 +37,7 @@ Claude Code users can also install all of them as a plugin:
 | [prompt-engineering](skills/prompt-engineering/SKILL.md) | Fixes an LLM prompt's structure first, then tunes it against at least 10 measured test cases. |
 | [autonomous-batch](skills/autonomous-batch/SKILL.md) | Runs a queue of similar, independent tasks one subagent at a time, each ending in its own pull request. Claude Code only. |
 | [plain](skills/plain/SKILL.md) | Explains a term, a piece of code or a pasted post in plain words without losing accuracy; a deeper mode helps a concept stick. |
+| [brief](skills/brief/SKILL.md) | Teaches one theme a day from your own saved bookmarks, old and new, in plain words with one thing to try today. |
 
 Some skills include an `evals/` folder with test prompts and graders. Run them with
 `claude plugin eval skills/<name>` if you use Claude Code.
