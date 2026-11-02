@@ -38,6 +38,7 @@ Claude Code users can also install all of them as a plugin:
 | [autonomous-batch](skills/autonomous-batch/SKILL.md) | Runs a queue of similar, independent tasks one subagent at a time, each ending in its own pull request. Claude Code only. |
 | [plain](skills/plain/SKILL.md) | Explains a term, a piece of code or a pasted post in plain words without losing accuracy; a deeper mode helps a concept stick. |
 | [brief](skills/brief/SKILL.md) | Teaches one theme a day from your own saved bookmarks, old and new, in plain words with one thing to try today. |
+| [automate-me](skills/automate-me/SKILL.md) | Once a week, reads your recent sessions, finds where you corrected the agent, asked it to explain or repeated yourself, works out why, and drafts fixes for you to approve. Claude Code only. |
 
 Some skills include an `evals/` folder with test prompts and graders. Run them with
 `claude plugin eval skills/<name>` if you use Claude Code.
