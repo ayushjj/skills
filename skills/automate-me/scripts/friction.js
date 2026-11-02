@@ -5,19 +5,27 @@
 // or Claude's next reply admitted a miss ("you're right"). Also counts tool errors and hook /
 // permission blocks. Prints COUNTS + pointers (file, line) only — never transcript text.
 //
-// Usage: node friction.js --since YYYY-MM-DD [--until YYYY-MM-DD] [--top N] [--min-turns N] [--json out.json]
 // FRICTION_ROOT overrides the transcripts dir (tests only). Exit 2 = CONTROL FAILED; exit 64 = bad usage.
 'use strict';
 const fs = require('fs'), path = require('path'), os = require('os');
 
-function usage(msg) { console.error(`usage error: ${msg}\n${fs.readFileSync(__filename, 'utf8').split('\n')[7]}`); process.exit(64); }
-function flag(name, fallback) {
-  const i = process.argv.indexOf(name);
-  if (i < 0) return fallback;
-  const v = process.argv[i + 1];
-  if (v === undefined || v.startsWith('--')) usage(`${name} needs a value`);
-  return v;
+const USAGE = 'Usage: node friction.js --since YYYY-MM-DD [--until YYYY-MM-DD] [--top N] [--min-turns N] [--json out.json]';
+function usage(msg) { console.error(`usage error: ${msg}\n${USAGE}`); process.exit(64); }
+// Parse every argv token up front: `--name value` or `--name=value`; anything else is a usage error.
+const KNOWN_FLAGS = ['--since', '--until', '--top', '--min-turns', '--json'];
+const flags = {};
+{
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    const m = /^(--[\w-]+)(?:=([\s\S]*))?$/.exec(argv[i]);
+    if (!m || !KNOWN_FLAGS.includes(m[1])) usage(`unknown argument ${argv[i]}`);
+    let v = m[2];
+    if (v === undefined) { v = argv[i + 1]; i++; }
+    if (v === undefined || v === '' || v.startsWith('--')) usage(`${m[1]} needs a value`);
+    flags[m[1]] = v;
+  }
 }
+const flag = (name, fallback) => (name in flags ? flags[name] : fallback);
 function dateFlag(name, fallback) {
   const v = Date.parse(flag(name, fallback));
   if (!Number.isFinite(v)) usage(`${name} is not a date`);
@@ -34,7 +42,10 @@ const top = intFlag('--top', '15');
 // Sessions with a single owner message are almost all automated one-shot runs (headless `claude -p`),
 // not you working. Counting them dilutes every rate (in one real run, 230 of 282 "sessions").
 const minTurns = intFlag('--min-turns', '2');
-const root = process.env.FRICTION_ROOT || path.join(os.homedir(), '.claude', 'projects');
+const out = flag('--json');
+if (out) fs.rmSync(out, { force: true }); // a failed run must never leave an old file to be read as this run's
+const root = process.env.FRICTION_ROOT
+  || path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
 
 // Owner-message signals, in priority order: one message counts under its FIRST match only.
 const OWNER_SIGNALS = [
@@ -48,16 +59,19 @@ const ALL_SIGNALS = [...OWNER_SIGNALS.map(([k]) => k), 'repeat_request', 'caught
 const ADMISSION = /^(you'?re right|you are right|i got that wrong|good catch|that'?s on me|my mistake|you caught)/;
 const BLOCK = /^(PreToolUse:\w+ hook error|Permission for this action was denied|.{0,40}hook (error|blocked))/i;
 
+const textOf = blocks => blocks.filter(x => x && x.type === 'text').map(x => x.text).join(' ');
 function ownerText(entry) {
   if (entry.type !== 'user' || entry.isMeta || entry.isCompactSummary || entry.isSidechain) return null;
   const content = entry.message && entry.message.content;
   if (typeof content === 'string') return content;
-  if (Array.isArray(content) && !content.some(x => x && x.type === 'tool_result')) {
-    return content.filter(x => x && x.type === 'text').map(x => x.text).join(' ') || null;
-  }
+  if (Array.isArray(content) && !content.some(x => x && x.type === 'tool_result')) return textOf(content) || null;
   return null;
 }
 const isSystemish = text => /^(<(command-|local-command|bash-|task-notification|system-reminder)|\[SYSTEM|\[Request interrupted)/.test(text);
+const curly = text => text.replace(/[‘’]/g, "'");
+// What the owner actually typed: drop pastes, <tag>…</tag> wrappers (IDE file, system blocks) and URLs.
+const ownerWords = text => curly(text.replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, '')
+  .replace(/<([a-z][\w-]*)\b[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/https?:\/\/\S+/g, '')).toLowerCase().trim();
 const wordSet = text => new Set(text.match(/[a-z]{4,}/g) || []);
 function overlap(a, b) {
   if (a.size < 4 || b.size < 4) return 0; // too short to call a repeat
@@ -79,26 +93,28 @@ function readSession(file, project) {
     lineNo++;
     if (!line) continue;
     let entry; try { entry = JSON.parse(line); } catch { continue; }
-    if (entry.entrypoint && entry.entrypoint !== 'cli') session.automated = true; // sdk/headless jobs, not the owner
-    const ts = entry.timestamp ? Date.parse(entry.timestamp) : null;
-    if (ts !== null && firstTs === null) firstTs = ts;
-    if (ts !== null && (ts < since || ts >= until)) continue; // count only what happened inside the window
+    // Known entrypoints: cli, claude-desktop = the owner; sdk-cli, sdk-py = automated jobs.
+    if (typeof entry.entrypoint === 'string' && entry.entrypoint.startsWith('sdk-')) session.automated = true;
+    const ts = Date.parse(entry.timestamp);
+    if (Number.isFinite(ts) && firstTs === null) firstTs = ts;
+    if (Number.isFinite(ts) && (ts < since || ts >= until)) continue; // count only what happened inside the window
     const content = entry.message && entry.message.content;
     if (entry.type === 'user' && Array.isArray(content)) {
       for (const block of content) if (block && block.type === 'tool_result') {
         awaitingReplyTo = null; // a reply after tool work answers the tool, not the owner
         if (block.is_error) session.toolErrors++;
-        const body = typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '');
+        const body = typeof block.content === 'string' ? block.content
+          : Array.isArray(block.content) ? textOf(block.content) : JSON.stringify(block.content || '');
         if (BLOCK.test(body.trimStart())) session.blocks++;
       }
     }
     if (entry.type === 'assistant' && !entry.isSidechain && Array.isArray(content) && awaitingReplyTo !== null) {
-      const reply = content.filter(x => x && x.type === 'text').map(x => x.text).join(' ').trim().toLowerCase();
+      const reply = curly(textOf(content)).trim().toLowerCase();
       if (reply) { if (ADMISSION.test(reply)) mark(awaitingReplyTo, 'caught_miss'); awaitingReplyTo = null; }
     }
     const text = ownerText(entry);
     if (!text || isSystemish(text.trim())) continue;
-    const lower = text.replace(/<pasted_content[\s\S]*?<\/pasted_content>/g, '').toLowerCase().trim();
+    const lower = ownerWords(text);
     session.turns++;
     awaitingReplyTo = lineNo;
     const words = wordSet(lower);
@@ -111,7 +127,7 @@ function readSession(file, project) {
   return session;
 }
 
-let skippedShort = 0, skippedAuto = 0;
+let skippedShort = 0, skippedAuto = 0, skippedUnreadable = 0;
 const sessions = [];
 let dirs = [];
 try { dirs = fs.readdirSync(root); } catch { /* handled by control below */ }
@@ -121,10 +137,10 @@ for (const dir of dirs) {
   let files; try { files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl')); } catch { continue; }
   for (const f of files) {
     const file = path.join(projectDir, f);
-    let stat; try { stat = fs.statSync(file); } catch { continue; }
+    let stat; try { stat = fs.statSync(file); } catch { skippedUnreadable++; continue; }
     if (stat.mtimeMs < since) continue; // not touched since the window opened (cheap prefilter)
     const session = readSession(file, dir.replace(/^-Users-[^-]+-?/, '') || 'home');
-    if (!session || session.firstTs === null) continue;
+    if (!session || !Number.isFinite(session.firstTs)) { skippedUnreadable++; continue; }
     if (session.automated) { skippedAuto++; continue; }
     if (session.turns < minTurns) { skippedShort++; continue; }
     session.start = new Date(session.firstTs).toISOString().slice(0, 10);
@@ -137,16 +153,17 @@ if (sessions.length === 0) { console.error(`CONTROL FAILED: no sessions with >=$
 const totals = {}; let turns = 0;
 for (const s of sessions) { turns += s.turns; for (const [k, v] of Object.entries(s.counts)) totals[k] = (totals[k] || 0) + v; }
 const sessionsWith = k => sessions.filter(s => s.counts[k]).length;
-console.log(`sessions ${sessions.length} (owner, >=${minTurns} turns in window; skipped ${skippedAuto} automated, ${skippedShort} shorter) | owner turns ${turns}`);
+console.log(`sessions ${sessions.length} (owner, >=${minTurns} turns in window; skipped ${skippedAuto} automated, ${skippedShort} shorter) | owner turns ${turns} | skipped ${skippedUnreadable} unreadable`);
 console.log('signal\tmoments\tsessions\t% of sessions');
 for (const k of ALL_SIGNALS) console.log(`${k}\t${totals[k] || 0}\t${sessionsWith(k)}\t${Math.round(100 * sessionsWith(k) / sessions.length)}%`);
 console.log(`tool errors ${sessions.reduce((a, s) => a + s.toolErrors, 0)} | hook/permission blocks ${sessions.reduce((a, s) => a + s.blocks, 0)}`);
 const ranked = [...sessions].sort((a, b) => b.friction - a.friction).slice(0, top);
 console.log(`\nTOP ${ranked.length} sessions by friction (open these windows):`);
 for (const s of ranked) console.log(`${s.start}\t${s.project}\tturns ${s.turns}\t${JSON.stringify(s.counts)}\tblocks ${s.blocks}\t${s.file}\tlines ${s.moments.slice(0, 12).map(m => m.line).join(',')}`);
-const out = flag('--json');
-if (out) fs.writeFileSync(out, JSON.stringify(ranked.map(({ firstTs, ...rest }) => rest), null, 1));
-// Control: 20+ owner turns with zero OWNER-side signals means the detector is blind (format change,
-// broken regex). caught_miss is Claude-side, so it cannot mask a blind owner detector.
-const ownerSignals = ALL_SIGNALS.filter(k => k !== 'caught_miss').reduce((a, k) => a + (totals[k] || 0), 0);
+// Control: 20+ owner turns with zero direct owner signals means the detector is blind (format change,
+// broken regex). repeat_request is excluded (it fires on near-identical boilerplate wrappers) and
+// caught_miss is Claude-side, so neither can mask a blind owner detector.
+const ownerSignals = OWNER_SIGNALS.reduce((a, [k]) => a + (totals[k] || 0), 0);
 if (turns >= 20 && ownerSignals === 0) { console.error(`CONTROL FAILED: ${turns} owner turns but no owner signals`); process.exit(2); }
+if (turns < 20) console.error('CONTROL NOT RUN (<20 owner turns): treat counts as low confidence');
+if (out) fs.writeFileSync(out, JSON.stringify(ranked.map(({ firstTs, ...rest }) => rest), null, 1));

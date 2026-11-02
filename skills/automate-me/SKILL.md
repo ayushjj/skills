@@ -36,7 +36,7 @@ Say: "automate-me: last run {last_run} ({N} days ago). Reading sessions since th
 
 ```bash
 bash "<this skill's folder>/scripts/friction.test.sh"     # must pass first
-node "<this skill's folder>/scripts/friction.js" --since {last_run} --top 12 --json "$TMPDIR/friction.json"
+node "<this skill's folder>/scripts/friction.js" --since {last_run} --top 12 --json "${TMPDIR:-/tmp}/friction.json"
 ```
 
 `friction.js` reads the session transcripts in `~/.claude/projects/` and flags five kinds of moment
@@ -45,7 +45,9 @@ understand", "simpler"), **status** ("where are we"), **handback** ("you decide"
 asking"), and **repeat_request** (you said nearly the same thing twice in a row). It also flags
 **caught_miss**, when the agent's next reply opens with "you're right", and it counts tool errors
 and blocked actions. It prints counts and file/line pointers only, never transcript text. It skips
-automated runs and one-message sessions.
+automated runs (entrypoint starting `sdk-`), one-message sessions, files it can't read or that carry
+no usable timestamp (printed as `skipped N unreadable`), and project folders named like agent
+worktrees or scratchpads (`worktrees`, `scratchpad`, `-private-tmp`).
 
 **Exit 2 = CONTROL FAILED = the step did not run.** Never read it as "no friction". The test script
 proves the counter can fire and can stay quiet on known examples before any number is trusted.
@@ -57,7 +59,9 @@ Hand `friction.json` to one subagent on your strongest model. It reads a window 
 at least 8 sessions, and returns:
 
 - **How often the counter was right** (real friction / moments checked). If a signal is right less
-  than about 60% of the time, tune its pattern in `friction.js` and add a test case.
+  than about 60% of the time, DRAFT a pattern change: the exact old → new diff for `friction.js`
+  and a new test case, in the report. Apply it only after you say yes, then re-run
+  `friction.test.sh`. The run never edits the scripts before that yes.
 - **Root causes, grouped,** with counts and paraphrased examples. No verbatim text from you or the
   agent, no client names, no credentials, tokens or URLs with keys (agent replies can repeat a
   secret you pasted, so paraphrase those too).
@@ -89,8 +93,9 @@ didn't work. Say so plainly; it is the most useful thing a run can find.
 
 Save the report to `~/.claude/automate-me-reports/{YYYY-MM-DD}-report.md`: counts, causes, drafts.
 No transcript text, and not the top-sessions table (folder names can carry client names). Before
-saving, search the draft for `password|token|secret|api[_-]?key|key=` and any client names you keep
-private; a hit blocks the save until it is rewritten.
+saving, search the draft, ignoring case
+(`grep -inE 'password|token|secret|api[_-]?key|key=|sk-ant-|ghp_|AKIA|xoxb-|Bearer |-----BEGIN'`),
+and for any client names you keep private; a hit blocks the save until it is rewritten.
 
 Show each fix as: what goes wrong today → what changes after → the exact edit. Apply only the ones
 you approve.
